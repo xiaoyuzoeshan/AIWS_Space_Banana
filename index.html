@@ -134,48 +134,75 @@
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
       });
 
-    /* ── Load NASA APOD by scraping astropix.html via CORS proxy ── */
+    /* ── Load NASA APOD — tries 3 strategies in order ── */
     async function loadAPOD() {
+      const strategies = [
+        () => fetchViaCorsproxy(),
+        () => fetchViaAllorigins(),
+        () => fetchViaNasaAPI(),
+      ];
+      for (const fn of strategies) {
+        try { if (await fn()) return; } catch (_) {}
+      }
+      fallbackBg();
+    }
+
+    // Strategy 1: corsproxy.io (returns raw HTML)
+    async function fetchViaCorsproxy() {
+      const res = await fetch(
+        'https://corsproxy.io/?' + encodeURIComponent('https://apod.nasa.gov/apod/astropix.html'),
+        { signal: AbortSignal.timeout(6000) }
+      );
+      if (!res.ok) return false;
+      return parseAPODHtml(await res.text());
+    }
+
+    // Strategy 2: allorigins.win (returns JSON {contents})
+    async function fetchViaAllorigins() {
+      const res = await fetch(
+        'https://api.allorigins.win/get?url=' + encodeURIComponent('https://apod.nasa.gov/apod/astropix.html'),
+        { signal: AbortSignal.timeout(8000) }
+      );
+      const data = await res.json();
+      return parseAPODHtml(data.contents);
+    }
+
+    // Strategy 3: NASA APOD JSON API (CORS-native, no proxy needed)
+    async function fetchViaNasaAPI() {
+      const res  = await fetch('https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY',
+        { signal: AbortSignal.timeout(8000) });
+      const data = await res.json();
+      const url  = (data.media_type === 'image') ? (data.url) : data.thumbnail_url;
+      if (!url) return false;
+      setBackground(url, data.title || '');
+      return true;
+    }
+
+    function parseAPODHtml(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      let imgPath = null;
+      for (const a of doc.querySelectorAll('a[href]')) {
+        if (/image\/.*\.jpg$/i.test(a.getAttribute('href'))) { imgPath = a.getAttribute('href'); break; }
+      }
+      if (!imgPath) {
+        for (const img of doc.querySelectorAll('img[src]')) {
+          if (/image\/.*\.jpg$/i.test(img.getAttribute('src'))) { imgPath = img.getAttribute('src'); break; }
+        }
+      }
+      if (!imgPath) return false;
+      const bold = doc.querySelector('center b');
+      setBackground('https://apod.nasa.gov/apod/' + imgPath, bold ? bold.textContent.trim() : '');
+      return true;
+    }
+
+    function setBackground(url, title) {
       const bg     = document.getElementById('apod-bg');
       const credit = document.getElementById('apod-credit');
-      try {
-        const proxyUrl = 'https://api.allorigins.win/get?url=' +
-          encodeURIComponent('https://apod.nasa.gov/apod/astropix.html');
-        const res  = await fetch(proxyUrl);
-        const data = await res.json();
-        const parser = new DOMParser();
-        const doc    = parser.parseFromString(data.contents, 'text/html');
-
-        let imgPath = null;
-        for (const a of doc.querySelectorAll('a[href]')) {
-          if (/image\/.*\.jpg$/i.test(a.getAttribute('href'))) {
-            imgPath = a.getAttribute('href');
-            break;
-          }
-        }
-        if (!imgPath) {
-          for (const img of doc.querySelectorAll('img[src]')) {
-            if (/image\/.*\.jpg$/i.test(img.getAttribute('src'))) {
-              imgPath = img.getAttribute('src');
-              break;
-            }
-          }
-        }
-        if (imgPath) {
-          bg.onload = () => bg.classList.add('loaded');
-          bg.src = 'https://apod.nasa.gov/apod/' + imgPath;
-          const bold = doc.querySelector('center b');
-          const titleText = bold ? bold.textContent.trim() : '';
-          if (titleText) {
-            credit.innerHTML =
-              `<a href="https://apod.nasa.gov/apod/astropix.html" target="_blank" rel="noopener">APOD</a>: ${titleText}`;
-          }
-        } else {
-          fallbackBg();
-        }
-      } catch (err) {
-        console.warn('Could not load APOD:', err);
-        fallbackBg();
+      bg.onload = () => bg.classList.add('loaded');
+      bg.src = url;
+      if (title) {
+        credit.innerHTML =
+          `<a href="https://apod.nasa.gov/apod/astropix.html" target="_blank" rel="noopener">APOD</a>: ${title}`;
       }
     }
 
