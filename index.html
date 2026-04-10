@@ -63,7 +63,7 @@
       text-shadow: 0 1px 10px rgba(0,0,0,0.9);
     }
 
-    /* ── Banana wrapper — 260 × 80% = 208px ── */
+    /* ── Banana wrapper — 208px ── */
     .banana-wrap {
       position: relative;
       z-index: 1;
@@ -73,6 +73,7 @@
       width: 208px;
     }
 
+    /* CSS spin used only during initial 2-rotation phase */
     .banana-wrap.spinning {
       animation: clockwise 4s linear infinite;
     }
@@ -89,11 +90,12 @@
       pointer-events: none;
     }
 
-    /* ── Ribbon — 208 × 90% = 187px ── */
+    /* ── Ribbon — 187px wide, shifted left by 187px ── */
     .ribbon-wrap {
       position: absolute;
       top: 46%;
-      left: 50%;
+      /* left: 50% is banana center; subtract 1 full ribbon width to shift left */
+      left: calc(50% - 187px);
       transform: translate(-50%, -50%);
       width: 187px;
       pointer-events: none;
@@ -104,9 +106,10 @@
       width: 100%;
     }
 
+    /* Push Me: up by 1/4 ribbon height from center → top: 25% */
     .ribbon-text {
       position: absolute;
-      top: 50%;
+      top: 25%;
       left: 50%;
       transform: translate(-50%, -50%);
       font-family: 'Times New Roman', Times, serif;
@@ -150,7 +153,7 @@
   </div>
 
   <!-- Banana + ribbon -->
-  <div class="banana-wrap" id="banana" onclick="toggleSpin(this)">
+  <div class="banana-wrap" id="banana" onclick="handleClick(this)">
     <img class="banana-img" src="banana.png" alt="Banana" />
     <div class="ribbon-wrap">
       <img class="ribbon-img" src="ribbon_s.png" alt="ribbon" />
@@ -171,18 +174,14 @@
     async function loadAPOD() {
       const bg     = document.getElementById('apod-bg');
       const credit = document.getElementById('apod-credit');
-
       try {
         const proxyUrl = 'https://api.allorigins.win/get?url=' +
           encodeURIComponent('https://apod.nasa.gov/apod/astropix.html');
-
         const res  = await fetch(proxyUrl);
         const data = await res.json();
-
         const parser = new DOMParser();
         const doc    = parser.parseFromString(data.contents, 'text/html');
 
-        // APOD main image: find first <a href="image/YYMM/file.jpg">
         let imgPath = null;
         for (const a of doc.querySelectorAll('a[href]')) {
           if (/image\/.*\.jpg$/i.test(a.getAttribute('href'))) {
@@ -190,7 +189,6 @@
             break;
           }
         }
-        // Fallback: <img src="image/...jpg">
         if (!imgPath) {
           for (const img of doc.querySelectorAll('img[src]')) {
             if (/image\/.*\.jpg$/i.test(img.getAttribute('src'))) {
@@ -199,12 +197,9 @@
             }
           }
         }
-
         if (imgPath) {
           bg.onload = () => bg.classList.add('loaded');
           bg.src = 'https://apod.nasa.gov/apod/' + imgPath;
-
-          // Picture title for bottom-right credit
           const bold = doc.querySelector('center b');
           const titleText = bold ? bold.textContent.trim() : '';
           if (titleText) {
@@ -214,7 +209,6 @@
         } else {
           fallbackBg();
         }
-
       } catch (err) {
         console.warn('Could not load APOD:', err);
         fallbackBg();
@@ -226,9 +220,82 @@
         'radial-gradient(ellipse at center, #0d1b3e 0%, #000005 100%)';
     }
 
-    /* ── Banana click: toggle spin ── */
-    function toggleSpin(el) {
-      el.classList.toggle('spinning');
+    /* ══════════════════════════════════════════
+       Banana interaction state machine
+       idle → spinning (2 rotations = 8s) → floating
+       ══════════════════════════════════════════ */
+    let phase = 'idle';      // 'idle' | 'spinning' | 'floating'
+    let spinTimer = null;
+    let floatRAF  = null;
+    let fx, fy, fvx, fvy, frot; // float state
+    let fW, fH;                  // cached natural element dimensions
+
+    // 1.5°/frame keeps 360° in 4 s at ~60 fps (matches CSS animation speed)
+    const DEG_PER_FRAME = 1.5;
+    const FLOAT_PX_PER_FRAME = 2.5;
+
+    function handleClick(el) {
+      if (phase === 'floating') return;
+
+      if (phase === 'idle') {
+        phase = 'spinning';
+        el.classList.add('spinning');
+        // 2 rotations × 4 s each = 8 s
+        spinTimer = setTimeout(() => beginFloat(el), 8000);
+      } else {
+        // Cancel spin, back to idle
+        phase = 'idle';
+        el.classList.remove('spinning');
+        clearTimeout(spinTimer);
+      }
+    }
+
+    function beginFloat(el) {
+      phase = 'floating';
+      el.classList.remove('spinning');
+
+      // Capture position and natural size BEFORE applying JS transform
+      const rect = el.getBoundingClientRect();
+      fx = rect.left;
+      fy = rect.top;
+      fW = rect.width;
+      fH = rect.height;
+
+      // Switch element to viewport-anchored fixed positioning
+      el.style.position      = 'fixed';
+      el.style.margin        = '0';
+      el.style.left          = fx + 'px';
+      el.style.top           = fy + 'px';
+      el.style.transformOrigin = 'center center';
+
+      // Randomise launch direction (ensure both axes have movement)
+      const angle = Math.random() * Math.PI * 2;
+      fvx = Math.cos(angle) * FLOAT_PX_PER_FRAME;
+      fvy = Math.sin(angle) * FLOAT_PX_PER_FRAME;
+      frot = 0;
+
+      floatLoop(el);
+    }
+
+    function floatLoop(el) {
+      fx   += fvx;
+      fy   += fvy;
+      frot += DEG_PER_FRAME;
+
+      const vpW = window.innerWidth;
+      const vpH = window.innerHeight;
+
+      // Bounce off all four edges
+      if (fx <= 0)        { fx = 0;        fvx =  Math.abs(fvx); }
+      if (fx + fW >= vpW) { fx = vpW - fW; fvx = -Math.abs(fvx); }
+      if (fy <= 0)        { fy = 0;        fvy =  Math.abs(fvy); }
+      if (fy + fH >= vpH) { fy = vpH - fH; fvy = -Math.abs(fvy); }
+
+      el.style.left      = fx + 'px';
+      el.style.top       = fy + 'px';
+      el.style.transform = `rotate(${frot}deg)`;
+
+      floatRAF = requestAnimationFrame(() => floatLoop(el));
     }
 
     loadAPOD();
