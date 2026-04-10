@@ -90,38 +90,6 @@
       pointer-events: none;
     }
 
-    /* ── Ribbon — 187px wide, shifted left by 187px ── */
-    .ribbon-wrap {
-      position: absolute;
-      top: 46%;
-      /* left: 50% is banana center; subtract 1 full ribbon width to shift left */
-      left: calc(50% - 187px);
-      transform: translate(-50%, -50%);
-      width: 187px;
-      pointer-events: none;
-    }
-
-    .ribbon-img {
-      display: block;
-      width: 100%;
-    }
-
-    /* Push Me: up by 1/4 ribbon height from center → top: 25% */
-    .ribbon-text {
-      position: absolute;
-      top: 25%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-family: 'Times New Roman', Times, serif;
-      font-size: 0.8rem;
-      font-weight: bold;
-      color: #fff;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      white-space: nowrap;
-      text-shadow: 0 1px 5px rgba(0,0,0,0.7);
-    }
-
     /* ── Bottom-right APOD credit ── */
     #apod-credit {
       position: fixed;
@@ -155,10 +123,6 @@
   <!-- Banana + ribbon -->
   <div class="banana-wrap" id="banana" onclick="handleClick(this)">
     <img class="banana-img" src="banana.png" alt="Banana" />
-    <div class="ribbon-wrap">
-      <img class="ribbon-img" src="ribbon_s.png" alt="ribbon" />
-      <span class="ribbon-text">Push Me</span>
-    </div>
   </div>
 
   <div id="apod-credit"></div>
@@ -299,6 +263,56 @@
     }
 
     loadAPOD();
+
+    /* ══════════════════════════════════════════
+       Mouse star trail
+       ══════════════════════════════════════════ */
+    const STAR_CHARS = ['✦', '✧', '⋆', '★', '✩', '✫', '✬'];
+    const STAR_COLORS = ['#fff', '#ffe066', '#aad4ff', '#ffb3e6', '#b3ffe6', '#e0b3ff'];
+
+    function spawnStar(x, y) {
+      const el = document.createElement('span');
+      el.textContent = STAR_CHARS[Math.floor(Math.random() * STAR_CHARS.length)];
+
+      const size  = 10 + Math.random() * 14;          // 10–24 px
+      const color = STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)];
+      const vx    = (Math.random() - 0.5) * 3;        // horizontal drift
+      const vy    = -(1.5 + Math.random() * 2.5);     // always fly upward
+      const life  = 600 + Math.random() * 500;        // ms before gone
+
+      Object.assign(el.style, {
+        position:   'fixed',
+        left:       (x - size / 2) + 'px',
+        top:        (y - size / 2) + 'px',
+        fontSize:   size + 'px',
+        color:      color,
+        pointerEvents: 'none',
+        userSelect: 'none',
+        zIndex:     9999,
+        opacity:    1,
+        transition: `opacity ${life}ms ease, transform ${life}ms ease`,
+        transform:  'translate(0, 0) scale(1)',
+        textShadow: `0 0 6px ${color}`,
+      });
+
+      document.body.appendChild(el);
+
+      // Kick off movement on next frame so transition fires
+      requestAnimationFrame(() => {
+        el.style.transform = `translate(${vx * life / 16}px, ${vy * life / 16}px) scale(0.2)`;
+        el.style.opacity   = '0';
+      });
+
+      setTimeout(() => el.remove(), life + 50);
+    }
+
+    let lastStarTime = 0;
+    document.addEventListener('mousemove', e => {
+      const now = Date.now();
+      if (now - lastStarTime < 40) return;   // throttle: max ~25 stars/s
+      lastStarTime = now;
+      spawnStar(e.clientX, e.clientY);
+    });
   </script>
 </body>
 </html>
